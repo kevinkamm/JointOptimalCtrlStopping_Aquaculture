@@ -2,7 +2,7 @@
 # @Author: Kevin Kamm
 # @Date:   2025-09-19 10:15:53
 # @Last Modified by:   Kevin Kamm
-# @Last Modified time: 2025-10-03 11:11:08
+# @Last Modified time: 2025-10-03 13:37:15
 from processes import *
 import pandas as pd
 
@@ -119,55 +119,3 @@ def params_to_df(models:List[Union[Process,Feeding]],initialDatum:Optional[Dict[
                 value =  str(v) 
             all_params[key] = value
     return pd.DataFrame([all_params])
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    T = 3.0 # time horizon
-    r = 0.01 # interest rate
-
-    # Feeding Curve
-    f0 = 0.1
-    F = LinearFeeding(f0,T)
-
-    # Host parameters
-    mu = 0.1
-    mu_F = 1.0
-    h0 = 1
-
-    hModel = HostConstant(mu, mu_F, F)
-
-    # Weight parameters
-    gamma = 5.0
-    gamma_F = 8.0
-    w_inf = 3.0
-    w0 = 0.01 
-
-    wModel = GrowthConst(gamma, gamma_F, w_inf, F)
-    
-    # Feed price parameters
-    sigmaF = 0.25
-    PF0 = 0.075
-
-    pFModel = FeedPriceGBM(r, sigmaF, PF0)
-
-    # Biomass price parameters
-    sigmaB = 0.1
-    PB0 = 0.1
-
-    pBModel = BiomassPriceGBM(r, sigmaB, PB0)
-
-    # t = np.linspace(0, T, 100)
-    t = torch.linspace(0, T, 100, dtype=torch.float32, device='cuda')
-    ft = F(t)
-    print(hModel.drift(0, h0, f0))
-    print(hModel.diffusion(0, h0, f0))
-    print(wModel.drift(0, w0, f0))
-    print(wModel.diffusion(0, w0, f0))
-    # plt.plot(t, ft, 'k-', label="Feeding Level")
-    plt.plot(t.detach().cpu().ravel(), pFModel.simulate(t, PF0).detach().cpu().ravel(), 'b-', label="Feed Price")
-    plt.plot(t.detach().cpu().ravel(), pBModel.simulate(t, PB0).detach().cpu().ravel(), 'r-', label="Biomass Price")
-    plt.xlabel("Time")
-    plt.ylabel("Feeding Level")
-    plt.title("Feeding Level Over Time")
-    plt.legend()
-    plt.show()

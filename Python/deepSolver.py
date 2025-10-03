@@ -2,7 +2,7 @@
 # @Author: Kevin Kamm
 # @Date:   2025-09-20 08:58:37
 # @Last Modified by:   Kevin Kamm
-# @Last Modified time: 2025-09-29 13:02:21
+# @Last Modified time: 2025-10-03 13:37:45
 from tqdm import tqdm
 from processes import *
 import torch
@@ -237,9 +237,7 @@ class DeepSolver():
         self.input_dim = len(bnds)
         self.output_dim = 1 
 
-        # self.net = dgmCell(self.input_dim, hidden_dim, n_layers, self.output_dim).to(device).to(dtype)
         self.net = dgmCell.to(device).to(dtype)
-        # self.net = DGMCellFF(self.input_dim, hidden_dim, n_layers, self.output_dim).to(device).to(dtype)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-5)
 
         # self.loss_fn = torch.nn.MSELoss()
@@ -457,127 +455,3 @@ class DeepSolver():
         
 
     
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    from aquaculture import *
-    from fdSolver import *
-    from deepOS import *
-    dtype = torch.float32
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    seed = 0
-    torch.manual_seed(seed)
-    T = 3.0 # time horizon
-    r = 0.01 # interest rate
-
-    # Feeding Curve
-    f0 = 0.1
-    F = LinearFeeding(f0,T)
-    ft = F(np.linspace(0, T, 100))
-
-    # Host parameters
-    mu = 0.1
-    mu_F = 1.0
-    h0 = 1
-
-    hModel = HostConstant(mu, mu_F, F)
-
-    # Weight parameters
-    gamma = 5.0
-    gamma_F = 8.0
-    w_inf = 3.0
-    w0 = 0.01 
-
-    wModel = GrowthConst(gamma, gamma_F, w_inf, F)
-    
-    # Feed price parameters
-    sigmaF = 0.25
-    PF0 = 0.075
-
-    pFModel = FeedPriceGBM(r, sigmaF)
-    # Biomass price parameters
-    sigmaB = 0.1
-    PB0 = 0.1
-
-    pBModel = BiomassPriceGBM(r, sigmaB)
-
-    # Grids
-    N=64
-    Nt=2048
-    M = 1024*8
-
-    pFt = pFModel.simulate(np.linspace(0,T,Nt), PF0, batch=M)
-    pBt = pBModel.simulate(np.linspace(0,T,Nt), PB0, batch=M)
-
-    bnds = [(0.0, T, Nt), # time
-            (0.5*w0, 1.1*w_inf, N), # weight
-            (0.1*h0, 1.1*h0, N), # host
-            (0.1*pFt.min(), 1.5*pFt.max(), N//2), # feed price
-            (0.1*pBt.min(), 1.5*pBt.max(), N//2), # biomass price
-            (0.0, ft.max(), N//2)] # control
-    del pFt, pBt
-    k = lambda t, w, h, pf, pb, u: - h * u * pf
-    g = lambda t, w, h, pf, pb: w * h * pb
-
-
-    u = ControlProcessAquaculture({'f0':f0,'T':T,'w_inf':w_inf,'gamma_F':gamma_F,'mu_F':mu_F}, F)
-    # u = ControlProcessNN({'f0':f0,'T':T,'w_inf':w_inf,'gamma_F':gamma_F,'mu_F':mu_F}, input_dim=len(bnds[:-1]), hidden_dim=32, n_layers=3, output_dim=1, lr=1e-2).to(device).to(dtype)
-    u = ControlProcessNN2({}, input_dim=len(bnds[:-1]), hidden_dim=32, n_layers=3, output_dim=1, lr=1e-2).to(device).to(dtype)
-    
-    def gNN(X):
-        # t = X[:,0]
-        w = X[:,1].view(-1,1)
-        h = X[:,2].view(-1,1)
-        # pf = X[:,3]
-        pb = X[:,4].view(-1,1)
-        return w * h * pb
-    torch.manual_seed(1)
-    torch.cuda.manual_seed(1)
-    # dgmCell = DGMCellFFg(gNN,input_dim=len(bnds[:-1]), hidden_dim=32, n_layers=3, output_dim=1)
-    dgmCell = DGMCellFF(input_dim=len(bnds[:-1]), hidden_dim=32, n_layers=3, output_dim=1)
-    # dgmCell = DGMCellLSTM(input_dim=len(bnds[:-1]), hidden_dim=64, n_layers=3, output_dim=1)
-    opt = DeepSolver(r,k,g, bnds[:-1],[wModel, hModel, pFModel, pBModel], dgmCell,u,lr=5e-3,dtype=dtype,device=device)
-    opt.solve(epochs=15000,batch_size=4096,stopping=True)
-    # V, U, tau = opt.solve(epochs=10000,batch_size=4096,stopping=True)
-    Vopt0 = opt.net(torch.tensor([0,w0,h0,PF0,PB0],dtype=dtype,device=device).view(1,-1)).item()
-    print("Opt Crtl gives value ",Vopt0)
-    
-    out,tau = opt.simulate(torch.linspace(0,T,Nt,dtype=dtype,device=device),torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device=device),M=8*1024,stopping=True,includeCtrl=True,fuzzy=1e-1)
-    print("Opt Crtl Sim gives value ",out[:,-1,-1].mean().item(), " with stopping time ",tau.mean().item(), " and control ",out[:,:, -2].mean().item())
-    out,tau = opt.simulate(torch.linspace(0,T,Nt,dtype=dtype,device=device),torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device=device),M=8*1024,stopping=True,includeCtrl=True,fuzzy=5e-2)
-    print("Opt Crtl Sim gives value ",out[:,-1,-1].mean().item(), " with stopping time ",tau.mean().item(), " and control ",out[:,:, -2].mean().item())
-    out,tau = opt.simulate(torch.linspace(0,T,Nt,dtype=dtype,device=device),torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device=device),M=8*1024,stopping=True,includeCtrl=True,fuzzy=1e-2)
-    print("Opt Crtl Sim gives value ",out[:,-1,-1].mean().item(), " with stopping time ",tau.mean().item(), " and control ",out[:,:, -2].mean().item())
-    out,tau = opt.simulate(torch.linspace(0,T,Nt,dtype=dtype,device=device),torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device=device),M=8*1024,stopping=True,includeCtrl=True,fuzzy=0.0)
-    print("Opt Crtl Sim gives value ",out[:,-1,-1].mean().item(), " with stopping time ",tau.mean().item(), " and control ",out[:,:, -2].mean().item())
-
-    Nos:int = int(T*128) # number of time steps, don't use too many, it will slow down the method a lot
-    t:torch.Tensor = torch.linspace(0.0,T,Nos,dtype=dtype,device=device)
-
-    def modelGen(M,batch_factor=64): # You can change this and still use the same DeepOS network!
-        while True:
-            data = opt.simulate(t, torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device=device),M * batch_factor, includeCtrl=True).detach()
-            for i in range(batch_factor):
-                yield data[i*M:(i+1)*M,...]
-
-    d:int = 5 # Dimension of process
-    latent_dim: List[int] = [d+50,d+50] # latent dimensions of neural network
-    dOS = DeepOSNet(d,Nos,latent_dim=latent_dim,outputDims=1).to(device)
-    # print(dOS.deepOSNet)
-    trainErr, trainPrice=dOS.train_loop(modelGen)
-
-    px = 1/plt.rcParams['figure.dpi']  # pixel in inches
-    # with plt.style.context('dark_background'):
-    #     fig, ax= plt.subplots(figsize=(1600*px, 900*px))
-    #     ax.plot(trainErr,label='Training Error')
-    #     ax.plot(trainPrice,label='Option Price')
-    #     ax.legend(fancybox=True, framealpha=0.0)
-    #     # ax.set_yscale('log')
-    #     plt.show()
-
-    #########################################################################
-    ### Testing
-    #########################################################################
-    test = next(modelGen(1024*32,batch_factor=1))
-    tau,payoff=dOS.evalStopping(t,test)
-    print(f'Mean stopping time {tau.mean().item()} with price {payoff.mean().item()}') # reference 0.2047

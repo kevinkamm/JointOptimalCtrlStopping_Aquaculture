@@ -2,7 +2,7 @@
 # @Author: Kevin Kamm
 # @Date:   2025-09-19 11:19:24
 # @Last Modified by:   Kevin Kamm
-# @Last Modified time: 2025-10-01 17:26:00
+# @Last Modified time: 2025-10-03 13:37:55
 from typing import Tuple
 from processes import *
 from scipy.interpolate import RegularGridInterpolator
@@ -325,80 +325,3 @@ class FDSolver:
         else:
             return out
 
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    from aquaculture import *
-    dtype = torch.float32
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    seed = 0
-    torch.manual_seed(seed)
-    T = 3.0 # time horizon
-    r = 0.01 # interest rate
-
-    # Feeding Curve
-    f0 = 0.1
-    F = LinearFeeding(f0,T)
-    ft = F(np.linspace(0, T, 100))
-
-    # Host parameters
-    mu = 0.1
-    mu_F = 1.0
-    h0 = 1
-
-    hModel = HostConstant(mu, mu_F, F)
-
-    # Weight parameters
-    gamma = 5.0
-    gamma_F = 8.0
-    w_inf = 3.0
-    w0 = 0.01 
-
-    wModel = GrowthConst(gamma, gamma_F, w_inf, F)
-    
-    # Feed price parameters
-    sigmaF = 0.25
-    PF0 = 0.075
-
-    pFModel = FeedPriceGBM(r, sigmaF)
-    
-    # Biomass price parameters
-    sigmaB = 0.1
-    PB0 = 0.1
-
-    pBModel = BiomassPriceGBM(r, sigmaB)
-
-
-    # Grids
-    N=64
-    Nt=2048
-    M = 4096*8
-    pFt = pFModel.simulate(np.linspace(0,T,Nt), PF0, batch=M)
-    pBt = pBModel.simulate(np.linspace(0,T,Nt), PB0, batch=M)
-    tIndSave = torch.arange(0, Nt, 1, dtype=torch.int32, device=device)[::4]
-    tIndSave[-1] = Nt-1
-    bnds = [(0.0, T, Nt), # time
-            (0.5*w0, 1.1*w_inf, N), # weight
-            (0.1*h0, 1.1*h0, N), # host
-            (0.1*pFt.min(), 1.5*pFt.max(), N//2), # feed price
-            (0.1*pBt.min(), 1.5*pBt.max(), N//2), # biomass price
-            (0.0, ft.max(), N)] # control
-    
-    del pFt, pBt
-    
-    # G = Grids(bnds, dtype=dtype, device=device)
-    k = lambda t, w, h, pf, pb, u: - h * u * pf
-    g = lambda t, w, h, pf, pb: w * h * pb
-    opt = FDSolver(r, k, g, bnds, [wModel, hModel, pFModel, pBModel],tIndSave=tIndSave, dtype=dtype, device=device)
-    V, U = opt.solve(stopping=True)
-    initialDatum = torch.tensor([0,w0,h0,PF0,PB0],dtype=dtype,device=device).view(1,-1)
-    Vopt0 = V(initialDatum).item()
-    print("Opt Crtl gives value ",Vopt0)
-    print(U(initialDatum))
-    sim,tt,ttInd = opt.simulate(t=torch.linspace(0,T,Nt,dtype=dtype,device='cpu'), x0=torch.tensor([w0,h0,PF0,PB0],dtype=dtype,device='cpu'), M=1024*8, stopping=True, includeCtrl=True)
-    Vsim0 = sim.numpy()[:,ttInd.view(-1).numpy(),-1].mean()
-    print("Opt Sim Crtl gives value ",Vsim0, " with mean stopping time ", tt.mean().item())
-    print('test', sim[:,-1,-1].mean().item())
-    print('test', sim[:,Nt//2,-1].mean().item())

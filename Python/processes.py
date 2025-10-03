@@ -2,7 +2,7 @@
 # @Author: Kevin Kamm
 # @Date:   2025-09-19 08:51:11
 # @Last Modified by:   Kevin Kamm
-# @Last Modified time: 2025-10-02 14:34:04
+# @Last Modified time: 2025-10-03 13:38:30
 from abc import ABC, abstractmethod
 from typing import List, Optional, Union, Callable, Dict,Any
 from numpy.typing import DTypeLike, ArrayLike
@@ -378,19 +378,3 @@ class GBM(Process):
     def diffusion(self, t, x):
         return self.sigma(t, x) * x
         
-# def linearFeeding(t, f0, T:Optional[float]=None):
-#     if T is None:
-#         T = t.ravel()[-1]
-#     return f0 + (1-f0) * t / T
-        
-# def growthCtrl(t, x, u ,ft, mu=0.1,mu_F=1.0):
-#     return (mu - mu_F * (ft - u)**2) * x
-
-# def weightAlphaCtrl(t, x, u, ft, alpha_0=0.1, alpha_F=1.0):
-#     return (alpha_0 + alpha_F * (ft - u)**2) * x
-
-# def weightBetaCtrl(t, x, u, ft, beta=3.0):
-#     return beta
-
-if __name__ == "__main__":
-    pass
